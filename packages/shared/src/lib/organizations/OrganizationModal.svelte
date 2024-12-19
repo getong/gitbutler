@@ -2,10 +2,11 @@
 	import { getContext } from '$lib/context';
 	import RegisterInterest from '$lib/interest/RegisterInterest.svelte';
 	import Loading from '$lib/network/Loading.svelte';
+	import { isFound } from '$lib/network/loadable';
 	import { OrganizationService } from '$lib/organizations/organizationService';
 	import { organizationsSelectors } from '$lib/organizations/organizationsSlice';
 	import { ProjectService } from '$lib/organizations/projectService';
-	import { projectsSelectors } from '$lib/organizations/projectsSlice';
+	import { getProjectByRepositoryId } from '$lib/organizations/projectsPreview.svelte';
 	import { UserService } from '$lib/users/userService';
 	import { usersSelectors } from '$lib/users/usersSlice';
 	import { AppState } from '$lib/redux/store.svelte';
@@ -14,6 +15,7 @@
 	import SectionCard from '@gitbutler/ui/SectionCard.svelte';
 	import Textbox from '@gitbutler/ui/Textbox.svelte';
 	import Avatar from '@gitbutler/ui/avatar/Avatar.svelte';
+	import { getOrganizationBySlug } from '$lib/organizations/organizationsPreview.svelte';
 
 	type Props = {
 		slug: string;
@@ -26,41 +28,11 @@
 	const projectService = getContext(ProjectService);
 	const userService = getContext(UserService);
 
-	const organizationInterest = $derived(
-		organizationService.getOrganizationWithDetailsInterest(slug)
-	);
-
-	const loadableOrganization = $derived(
-		organizationsSelectors.selectById(appState.organizations, slug)
-	);
-
-	// These deriveds are only consumed inside the modal
-	const users = $derived.by(() => {
-		if (loadableOrganization?.type !== 'found') return [];
-		const organization = loadableOrganization.value;
-		return (
-			organization.memberLogins?.map((login) => ({
-				interest: userService.getUserInterest(login),
-				user: usersSelectors.selectById(appState.users, login)
-			})) || []
-		);
-	});
-
-	const projects = $derived.by(() => {
-		if (loadableOrganization?.type !== 'found') return [];
-		const organization = loadableOrganization.value;
-		return (
-			organization.projectRepositoryIds?.map((repositoryId) => ({
-				project: projectsSelectors.selectById(appState.projects, repositoryId),
-				interest: projectService.getProjectInterest(repositoryId)
-			})) || []
-		);
-	});
+	const organization = $derived(getOrganizationBySlug(appState, organizationService, slug));
 
 	const title = $derived.by(() => {
-		if (loadableOrganization?.type !== 'found') return '';
-		const organization = loadableOrganization.value;
-		return organization.name || organization.slug;
+		if (!isFound(organization.current)) return '';
+		return organization.current.value.name || organization.current.value.slug;
 	});
 
 	function onModalClose() {}
@@ -69,11 +41,8 @@
 </script>
 
 <Modal bind:this={modal} onClose={onModalClose} {title}>
-	<Loading loadable={loadableOrganization}>
+	<Loading loadable={organization.current}>
 		{#snippet children(organization)}
-			<RegisterInterest interest={organizationInterest} />
-
-			<h5 class="text-15 text-bold">Users:</h5>
 			{#if organization.inviteCode}
 				<div class="header-with-action">
 					<p>Invite code:</p>
@@ -81,43 +50,51 @@
 				</div>
 			{/if}
 
-			<div>
-				{#each users as { user, interest }, index}
-					<RegisterInterest {interest} />
+			{#if organization.memberLogins}
+				<h5 class="text-15 text-bold">Users:</h5>
 
-					<SectionCard
-						roundedBottom={index === users.length - 1}
-						roundedTop={index === 0}
-						orientation="row"
-					>
-						<Avatar
-							size="medium"
-							tooltip={user?.name || 'Unknown'}
-							srcUrl={user?.avatarUrl || ''}
-						/>
-						<p>{user?.name}</p>
-					</SectionCard>
-				{/each}
-			</div>
+				<div>
+					{#each organization.memberLogins as login, index}
+						{@const interest = userService.getUserInterest(login)}
+						{@const user = usersSelectors.selectById(appState.users, login)}
+						<RegisterInterest {interest} />
 
-			<h5 class="text-15 text-bold">Projects:</h5>
-			<div>
-				{#each projects as { project, interest }, index}
-					<RegisterInterest {interest} />
+						<SectionCard
+							roundedBottom={index + 1 === organization.memberLogins.length}
+							roundedTop={index === 0}
+							orientation="row"
+						>
+							<Avatar
+								size="medium"
+								tooltip={user?.name || 'Unknown'}
+								srcUrl={user?.avatarUrl || ''}
+							/>
+							<p>{user?.name}</p>
+						</SectionCard>
+					{/each}
+				</div>
+			{/if}
 
-					<SectionCard
-						roundedBottom={index === projects.length - 1}
-						roundedTop={index === 0}
-						orientation="row"
-					>
-						<Loading loadable={project}>
-							{#snippet children(project)}
-								<p>{project.name}</p>
-							{/snippet}
-						</Loading>
-					</SectionCard>
-				{/each}
-			</div>
+			{#if organization.projectRepositoryIds}
+				<h5 class="text-15 text-bold">Projects:</h5>
+				<div>
+					{#each organization.projectRepositoryIds as repositoryId, index}
+						{@const project = getProjectByRepositoryId(appState, projectService, repositoryId)}
+
+						<SectionCard
+							roundedBottom={index + 1 === organization.projectRepositoryIds.length}
+							roundedTop={index === 0}
+							orientation="row"
+						>
+							<Loading loadable={project.current}>
+								{#snippet children(project)}
+									<p>{project.name}</p>
+								{/snippet}
+							</Loading>
+						</SectionCard>
+					{/each}
+				</div>
+			{/if}
 		{/snippet}
 	</Loading>
 </Modal>
